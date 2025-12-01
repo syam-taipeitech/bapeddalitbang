@@ -26,7 +26,41 @@ def load_data():
 
 df = load_data()
 
+# ======================================================
+# PARSER MULTI-POKTAN PER DESA
+# nama_poktan bisa berisi banyak poktan dalam 1 sel
+# dipisah oleh \n / , / ;
+# ======================================================
+def generate_poktan_list(df):
+    poktan_dict = {}
 
+    for _, row in df.iterrows():
+        kec = str(row["kecamatan"]).strip()
+        desa = str(row["desa"]).strip()
+        poktan_raw = str(row["nama_poktan"]).strip()
+
+        # pisahkan oleh baris baru, koma, atau titik koma
+        for sep in ["\n", ",", ";"]:
+            poktan_raw = poktan_raw.replace(sep, "|")
+
+        poktan_split = [p.strip() for p in poktan_raw.split("|") if p.strip()]
+
+        # inisialisasi kecamatan
+        if kec not in poktan_dict:
+            poktan_dict[kec] = {}
+
+        # inisialisasi desa
+        if desa not in poktan_dict[kec]:
+            poktan_dict[kec][desa] = []
+
+        # tambahkan poktan
+        for p in poktan_split:
+            if p not in poktan_dict[kec][desa]:
+                poktan_dict[kec][desa].append(p)
+
+    return poktan_dict
+
+poktan_list = generate_poktan_list(df)
 # ===========================
 # SIDEBAR MENU
 # ===========================
