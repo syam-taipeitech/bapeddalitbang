@@ -11,6 +11,7 @@ Original file is located at
 # Kecamatan → Desa → Gapoktan (Clean)
 # ============================================
 
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -23,16 +24,32 @@ with open("sabdatani.css") as f:
 
 st.set_page_config(page_title="Dashboard Sabda Tani – Gapoktan", layout="wide")
 
-
 # ================================
 # LOAD DATA
 # ================================
-gapoktan_df = pd.read_excel("data1.xlsx")     # Desa → Gapoktan
-kec_desa_df = pd.read_csv("poktan_clean.csv") # Kecamatan → Desa
+gapoktan_df = pd.read_excel("data1.xlsx")      # Desa → Gapoktan
+kec_desa_df = pd.read_csv("poktan_clean.csv")  # Kecamatan → Desa
 
 
 # ================================
-# PARSER: Desa → Gapoktan
+# LIST KECAMATAN (ambil dari kolom pertama file data1.xlsx)
+# ================================
+def load_kecamatan_list(df):
+    return (
+        df.iloc[:, 0]          # kolom pertama = kecamatan
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .drop_duplicates()
+        .tolist()
+    )
+
+list_kecamatan_clean = load_kecamatan_list(gapoktan_df)
+
+
+
+# ================================
+# PARSER DESA → LIST GAPOKTAN
 # ================================
 def parse_gapoktan(df):
     result = {}
@@ -46,7 +63,7 @@ desa_gapoktan = parse_gapoktan(gapoktan_df)
 
 
 # ================================
-# PARSER: Kecamatan → Desa → Gapoktan
+# PARSER KECAMATAN → DESA → GAPOKTAN
 # ================================
 def build_hierarchy(kec_desa_df, desa_gapoktan):
     hierarchy = {}
@@ -58,11 +75,10 @@ def build_hierarchy(kec_desa_df, desa_gapoktan):
         if kec not in hierarchy:
             hierarchy[kec] = {}
 
-        # Jika desa ada di Excel → ambil gapoktan
         if desa in desa_gapoktan:
             hierarchy[kec][desa] = desa_gapoktan[desa]
         else:
-            hierarchy[kec][desa] = []   # tidak ada gapoktan
+            hierarchy[kec][desa] = []  # jika tidak ada gapoktan
 
     return hierarchy
 
@@ -70,13 +86,14 @@ data_hierarchy = build_hierarchy(kec_desa_df, desa_gapoktan)
 
 
 # ================================
-# HEADER
+# DASHBOARD HEADER
 # ================================
 st.markdown("""
 <div class="title">
 🌾 <span>Dashboard Sabda Tani – Gapoktan</span>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 # ================================
@@ -89,31 +106,38 @@ total_gapoktan = sum(len(v) for v in desa_gapoktan.values())
 col1, col2, col3 = st.columns(3)
 
 col1.markdown(f"""
-<div class="card"><h3>Total Kecamatan</h3><p>{total_kec}</p></div>
+<div class="card">
+<h3>Total Kecamatan</h3>
+<p>{total_kec}</p>
+</div>
 """, unsafe_allow_html=True)
 
 col2.markdown(f"""
-<div class="card"><h3>Total Desa</h3><p>{total_desa}</p></div>
+<div class="card">
+<h3>Total Desa</h3>
+<p>{total_desa}</p>
+</div>
 """, unsafe_allow_html=True)
 
 col3.markdown(f"""
-<div class="card"><h3>Total Gapoktan</h3><p>{total_gapoktan}</p></div>
+<div class="card">
+<h3>Total Gapoktan</h3>
+<p>{total_gapoktan}</p>
+</div>
 """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-
 # ================================
-# CHART – Gapoktan per Kecamatan
+# GRAFIK: GAPOKTAN PER KECAMATAN
 # ================================
 st.markdown("### 📊 Jumlah Gapoktan per Kecamatan")
 
 df_chart = []
+
 for kec, desa_dict in data_hierarchy.items():
-    df_chart.append({
-        "kecamatan": kec,
-        "gapoktan": sum(len(g) for g in desa_dict.values())
-    })
+    count = sum(len(g_list) for g_list in desa_dict.values())
+    df_chart.append({"kecamatan": kec, "gapoktan": count})
 
 df_chart = pd.DataFrame(df_chart)
 
@@ -127,82 +151,29 @@ fig = px.bar(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-
 # ================================
-# INTERACTIVE MENU (PREMIUM GOLD)
+# MENU INTERAKTIF DETAIL
 # ================================
-
 st.markdown("### 🔎 Detail Gapoktan per Kecamatan & Desa")
 
-# --- Kolom Filter ---
 c1, c2 = st.columns(2)
 
-# Searchable dropdown kecamatan
-kec_select = c1.selectbox(
-    "Pilih Kecamatan",
-    sorted(list_kecamatan_clean),
-    index=None,
-    placeholder="Cari kecamatan..."
-)
+# --- KECAMATAN dari Excel (list bersih) ---
+kec_select = c1.selectbox("Pilih Kecamatan", sorted(list_kecamatan_clean))
 
-# Validasi
-if kec_select is None:
-    st.info("Silakan pilih kecamatan untuk melihat data.")
-    st.stop()
+# --- DESA mengikuti KECAMATAN ---
+desa_list = list(data_hierarchy[kec_select].keys())
+desa_select = c2.selectbox("Pilih Desa", desa_list)
 
-# Multiselect desa
-desa_multiselect = c2.multiselect(
-    "Pilih Desa (bisa lebih dari satu)",
-    sorted(data_hierarchy[kec_select].keys()),
-    placeholder="Pilih satu atau lebih desa..."
-)
+gapoktan_list = data_hierarchy[kec_select][desa_select]
 
-# Jika belum pilih desa → fallback 1 desa default
-if not desa_multiselect:
-    desa_multiselect = [sorted(data_hierarchy[kec_select].keys())[0]]
+st.markdown(f"### 🌱 Daftar Gapoktan – **{desa_select}**")
 
-# SUMMARY TOP
-summary_total = sum(len(data_hierarchy[kec_select][d]) for d in desa_multiselect)
-
-st.markdown(f"""
-<div class="card-summary">
-<h2>📊 Total Gapoktan untuk Desa Terpilih</h2>
-<p>{summary_total}</p>
-</div>
-""", unsafe_allow_html=True)
-
-# CHART DESA
-chart_desa = []
-for d in data_hierarchy[kec_select]:
-    chart_desa.append({"desa": d, "gapoktan": len(data_hierarchy[kec_select][d])})
-
-fig_desa = px.bar(
-    pd.DataFrame(chart_desa),
-    x="desa",
-    y="gapoktan",
-    title=f"Distribusi Gapoktan per Desa – Kecamatan {kec_select}",
-    color="gapoktan",
-    color_continuous_scale="YlGn"
-)
-st.plotly_chart(fig_desa, use_container_width=True)
-
-# TABLE DETAIL
-st.markdown("### 🧩 Tabel Gapoktan per Desa (Data Terpilih)")
-
-table_data = []
-for desa in desa_multiselect:
-    for g in data_hierarchy[kec_select][desa]:
-        table_data.append([desa, g])
-
-df_table = pd.DataFrame(table_data, columns=["Desa", "Gapoktan"])
-st.dataframe(df_table, use_container_width=True, hide_index=True)
-
-# LIST GAPOKTAN PER DESA
-for desa in desa_multiselect:
-    st.markdown(f"### 🌱 Daftar Gapoktan – **{desa}**")
-    for g in data_hierarchy[kec_select][desa]:
+if len(gapoktan_list) == 0:
+    st.info("Tidak ada data gapoktan untuk desa ini.")
+else:
+    for g in gapoktan_list:
         st.markdown(f"- {g}")
-
 
 
 
