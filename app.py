@@ -12,302 +12,212 @@ import pandas as pd
 import plotly.express as px
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import HeatMap, MarkerCluster
+from folium.plugins import MarkerCluster
 from geopy.geocoders import Nominatim
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+import base64
+from io import BytesIO
+from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-import plotly.io as pio
-import uuid
+import os
 
-# ============================
-# LOAD CSS
-# ============================
-with open("sabdatani.css") as f:
-    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-# ============================
-# GEOCODER
-# ============================
-geolocator = Nominatim(user_agent="sabdatani")
+# ================================================================
+#  LOAD CSS PREMIUM
+# ================================================================
+css_path = "sabdatani.css"
+if os.path.exists(css_path):
+    with open(css_path) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+else:
+    st.warning("CSS file sabdatani.css tidak ditemukan.")
 
+
+# ================================================================
+#  LOAD DATA EXCEL (2 sheet)
+# ================================================================
 @st.cache_data
-def geo_address(address):
+def load_excel():
+    df_desa = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx", sheet_name="Data Desa")
+    df_poktan = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx", sheet_name="Data Poktan List")
+    return df_desa, df_poktan
+
+df_desa, df_poktan = load_excel()
+
+
+# ================================================================
+#  REFORMAT DATA DESA
+# ================================================================
+df_long = df_desa.melt(id_vars=["Kecamatan"], var_name="Kolom", value_name="Desa")
+df_long = df_long.dropna()
+df_long = df_long[["Kecamatan", "Desa"]]
+
+
+# ================================================================
+#  REFORMAT DATA POKTAN LIST → DESA, NAMA POKTAN
+# ================================================================
+poktan_list = []
+
+for col in df_poktan.columns:
+    desa_name = col.strip()
+    for val in df_poktan[col].dropna():
+        poktan_list.append({"Desa": desa_name, "Poktan": str(val).strip()})
+
+df_poktan_long = pd.DataFrame(poktan_list)
+
+df_merged = df_long.merge(df_poktan_long, on="Desa", how="left")
+
+# Hapus poktan kosong
+df_merged = df_merged.dropna(subset=["Poktan"])
+
+
+# ================================================================
+#  GEOCODER (Cache)
+# ================================================================
+@st.cache_data
+def geocode_place(place):
+    geolocator = Nominatim(user_agent="sabdatani")
     try:
-        loc = geolocator.geocode(f"{address}, Pacitan, Indonesia")
+        loc = geolocator.geocode(place + ", Pacitan, Jawa Timur, Indonesia")
         if loc:
             return loc.latitude, loc.longitude
     except:
         return None
     return None
 
-# ============================
-# LOAD EXCEL (2-sheet parser)
-# ============================
-@st.cache_data
-def load_excel(file):
-    xls = pd.ExcelFile(file)
 
-    # Sheet 1 = Kecamatan & Desa (ambil sheet pertama)
-    df_kecdesa = pd.read_excel(file, sheet_name=xls.sheet_names[0], header=None)
+# ================================================================
+#  PDF GENERATOR (MULTI HALAMAN)
+# ================================================================
+def generate_pdf(df):
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
 
-    # Sheet 2 = Data Poktan List
-    df_poktan = pd.read_excel(file, sheet_name="Data Poktan List")
+    # Cover Page
+    p.setFont("Helvetica-Bold", 22)
+    p.drawString(80, height - 100, "LAPORAN DATA POKTAN SABDA TANI")
+    p.setFont("Helvetica", 14)
+    p.drawString(80, height - 130, "Kabupaten Pacitan – 2025")
 
-    return df_kecdesa, df_poktan
+    p.showPage()
 
+    # Per Kecamatan
+    for kec in df["Kecamatan"].unique():
+        sub = df[df["Kecamatan"] == kec]
 
-# ============================
-# PARSER: Kecamatan → Desa
-# ============================
-def parse_kecamatan_desa(df):
-    data = {}
-    for idx, row in df.iterrows():
-        if idx == 0:
-            continue
-        kec = str(row[0]).strip()
-        if kec == "" or kec.lower() == "nan":
-            continue
+        p.setFont("Helvetica-Bold", 18)
+        p.drawString(50, height - 60, f"Kecamatan: {kec}")
 
-        desa_list = []
-        for col in row[1:]:
-            if pd.isna(col):
-                continue
-            desa_list.append(str(col).strip())
+        y = height - 100
 
-        data[kec] = desa_list
-    return data
+        for _, row in sub.iterrows():
+            p.setFont("Helvetica", 12)
+            text = f"- Desa {row['Desa']}: {row['Poktan']}"
+            p.drawString(60, y, text)
+            y -= 18
+            if y < 100:
+                p.showPage()
+                y = height - 60
 
+        p.showPage()
 
-# ============================
-# PARSER: Desa → Poktan
-# ============================
-def parse_desa_poktan(df):
-    desa_poktan = {}
+    p.save()
+    buffer.seek(0)
 
-    for col in df.columns:
-        desa_name = col.strip()
-        poktan_list = df[col].dropna().astype(str).tolist()
-        desa_poktan[desa_name] = poktan_list
-
-    return desa_poktan
+    return buffer
 
 
-# ============================
-# BUILD MASTER STRUCTURE
-# ============================
-def build_structure(kec_desa, desa_poktan):
-    structure = {}
-
-    for kec, desa_list in kec_desa.items():
-        structure[kec] = {}
-        for desa in desa_list:
-            if desa in desa_poktan:
-                structure[kec][desa] = desa_poktan[desa]
-            else:
-                structure[kec][desa] = []
-    return structure
-
-
-# ============================
-# CHART FUNCTIONS
-# ============================
-def chart_desa_per_kecamatan(df):
-    fig = px.bar(
-        df, x="Kecamatan", y="Jumlah Desa",
-        color="Jumlah Desa", text="Jumlah Desa",
-        color_continuous_scale="Greens",
-        title="📌 Jumlah Desa per Kecamatan"
-    )
-    return fig
-
-def chart_poktan_per_kecamatan(df):
-    fig = px.bar(
-        df, x="Kecamatan", y="Jumlah Poktan",
-        color="Jumlah Poktan", text="Jumlah Poktan",
-        color_continuous_scale="Greens",
-        title="🌿 Jumlah Poktan per Kecamatan"
-    )
-    return fig
-
-def chart_poktan_per_desa(df):
-    fig = px.bar(
-        df, x="Desa", y="Jumlah Poktan",
-        color="Jumlah Poktan", text="Jumlah Poktan",
-        color_continuous_scale="Greens",
-        title="🌱 Poktan per Desa"
-    )
-    fig.update_xaxes(tickangle=45)
-    return fig
-
-
-# ============================
-# GIS MAP ADVANCED
-# ============================
-def gis_advanced_map(data):
-    m = folium.Map(location=[-8.2, 111.1], zoom_start=10, tiles="CartoDB positron")
-    marker_cluster = MarkerCluster().add_to(m)
-    heat_data = []
-
-    for kec, desa_dict in data.items():
-        for desa, poktans in desa_dict.items():
-            coord = geo_address(desa)
-            if coord:
-                heat_data.append([coord[0], coord[1], len(poktans)])
-
-                if len(poktans) >= 15:
-                    color = "darkgreen"
-                elif len(poktans) >= 8:
-                    color = "green"
-                else:
-                    color = "lightgreen"
-
-                folium.Marker(
-                    coord,
-                    popup=f"<b>{desa}</b><br>Kecamatan: {kec}<br>Poktan: {len(poktans)}",
-                    icon=folium.Icon(color=color, icon="leaf")
-                ).add_to(marker_cluster)
-
-    HeatMap(heat_data, radius=25, blur=15).add_to(m)
-    folium.LayerControl().add_to(m)
-    return m
-
-
-# ============================
-# EXPORT PDF MULTI-HALAMAN
-# ============================
-def export_pdf_full(kec, desa, poktan_list, df_desa):
-    filename = f"Laporan_{kec}_{desa}.pdf"
-    styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(filename, pagesize=A4)
-    story = []
-
-    # Cover
-    story.append(Paragraph("<b><font size=24>SABDA TANI</font></b>", styles["Title"]))
-    story.append(Paragraph("Laporan Kelembagaan Pertanian", styles["Heading2"]))
-    story.append(Spacer(1, 20))
-    story.append(Paragraph(f"Kecamatan: {kec}", styles["Normal"]))
-    story.append(Paragraph(f"Desa: {desa}", styles["Normal"]))
-    story.append(Paragraph(f"Jumlah Poktan: {len(poktan_list)}", styles["Normal"]))
-    story.append(PageBreak())
-
-    # Tabel Desa
-    story.append(Paragraph("<b>Daftar Desa dan Jumlah Poktan</b>", styles["Heading2"]))
-    table_data = [["Desa", "Jumlah Poktan"]] + df_desa.values.tolist()
-
-    table = Table(table_data, colWidths=[200, 200])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.lightgreen),
-        ("GRID", (0,0), (-1,-1), 1, colors.grey),
-    ]))
-    story.append(table)
-    story.append(PageBreak())
-
-    # Poktan List
-    story.append(Paragraph("<b>Daftar Poktan</b>", styles["Heading2"]))
-    for p in poktan_list:
-        story.append(Paragraph(f"- {p}", styles["Normal"]))
-    story.append(PageBreak())
-
-    # Rekomendasi
-    story.append(Paragraph("<b>Rekomendasi</b>", styles["Heading2"]))
-    story.append(Paragraph("""
-    1. Penguatan kelembagaan desa sangat penting untuk stabilitas produksi.<br/>
-    2. Perlu pembinaan berkelanjutan untuk poktan beranggotakan sedikit.<br/>
-    3. Integrasikan sistem Sabda Tani untuk monitoring penyakit & NPK.<br/>
-    """, styles["Normal"]))
-
-    doc.build(story)
-    return filename
-
-
-# ============================
-# STREAMLIT UI
-# ============================
-st.sidebar.title("🌾 Sabda Tani Dashboard")
-uploaded = st.sidebar.file_uploader("Upload File Excel", type=["xlsx"])
-
-menu = st.sidebar.radio("Menu",
-    ["Dashboard Utama", "Kecamatan", "Desa", "Detail Poktan", "Treemap Hierarki", "Peta GIS", "Peta GIS Lanjutan", "Export PDF"]
+# ================================================================
+#  SIDEBAR MENU
+# ================================================================
+st.sidebar.title("🌿 Sabda Tani Dashboard")
+menu = st.sidebar.radio(
+    "Navigasi",
+    ["Dashboard Utama", "Peta GIS", "Data Poktan", "Export PDF"]
 )
 
-if uploaded:
-    df1, df2 = load_excel(uploaded)
 
-    kec_desa = parse_kecamatan_desa(df1)
-    desa_poktan = parse_desa_poktan(df2)
-    data = build_structure(kec_desa, desa_poktan)
+# ================================================================
+#  DASHBOARD UTAMA
+# ================================================================
+if menu == "Dashboard Utama":
+    st.title("🌾 Dashboard Sabda Tani – Pacitan 2025")
 
-    if menu == "Dashboard Utama":
-        st.title("🌿 Dashboard Utama Sabda Tani")
+    total_kec = df_long["Kecamatan"].nunique()
+    total_desa = df_long["Desa"].nunique()
+    total_poktan = df_poktan_long["Poktan"].nunique()
 
-        total_kec = len(data)
-        total_desa = sum(len(v) for v in data.values())
-        total_poktan = sum(len(vv) for v in data.values() for vv in v.values())
+    col1, col2, col3 = st.columns(3)
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Kecamatan", total_kec)
-        c2.metric("Total Desa", total_desa)
-        c3.metric("Total Poktan", total_poktan)
+    with col1:
+        st.markdown('<div class="kpi-card"><h3>Total Kecamatan</h3><h1>' +
+                    str(total_kec) + '</h1></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="kpi-card"><h3>Total Desa</h3><h1>' +
+                    str(total_desa) + '</h1></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="kpi-card"><h3>Total Poktan</h3><h1>' +
+                    str(total_poktan) + '</h1></div>', unsafe_allow_html=True)
 
-        df_desa = pd.DataFrame(
-            {"Kecamatan": list(kec_desa.keys()),
-             "Jumlah Desa": [len(v) for v in kec_desa.values()]}
-        )
+    st.subheader("📊 Distribusi Poktan per Kecamatan")
+    df_count = df_merged.groupby("Kecamatan")["Poktan"].count().reset_index()
+    df_count = df_count.rename(columns={"Poktan": "Jumlah Poktan"})
 
-        df_poktan = pd.DataFrame(
-            {"Kecamatan": list(kec_desa.keys()),
-             "Jumlah Poktan": [sum(len(data[k][d]) for d in data[k]) for k in data.keys()]}
-        )
+    fig = px.bar(df_count, x="Kecamatan", y="Jumlah Poktan",
+                 color="Jumlah Poktan", color_continuous_scale="Greens",
+                 title="Jumlah Poktan per Kecamatan")
+    st.plotly_chart(fig, use_container_width=True)
 
-        st.plotly_chart(chart_desa_per_kecamatan(df_desa), use_container_width=True)
-        st.plotly_chart(chart_poktan_per_kecamatan(df_poktan), use_container_width=True)
 
-    elif menu == "Kecamatan":
-        kec = st.selectbox("Pilih Kecamatan", list(data.keys()))
-        st.subheader(f"Daftar Desa di {kec}")
-        desa_list = list(data[kec].keys())
-        st.write(desa_list)
+# ================================================================
+#  PETA GIS
+# ================================================================
+elif menu == "Peta GIS":
+    st.title("🗺 Peta GIS Sabda Tani")
 
-        df = pd.DataFrame({"Desa": desa_list, "Jumlah Poktan": [len(data[kec][d]) for d in desa_list]})
-        st.plotly_chart(chart_poktan_per_desa(df), use_container_width=True)
+    map_center = [-8.2045, 111.0874]
+    m = folium.Map(location=map_center, zoom_start=11)
 
-    elif menu == "Desa":
-        kec = st.selectbox("Pilih Kecamatan", list(data.keys()))
-        desa = st.selectbox("Pilih Desa", list(data[kec].keys()))
-        st.write(data[kec][desa])
+    marker_cluster = MarkerCluster().add_to(m)
 
-    elif menu == "Peta GIS":
-        st.title("🗺️ Peta GIS")
-        m = folium.Map(location=[-8.2, 111.1], zoom_start=10)
-        for kec, desa_dict in data.items():
-            for desa in desa_dict:
-                coord = geo_address(desa)
-                if coord:
-                    folium.Marker(coord, popup=desa).add_to(m)
-        st_folium(m, width=900)
+    for _, row in df_merged.iterrows():
+        loc = geocode_place(row["Desa"])
+        if loc:
+            folium.Marker(
+                location=loc,
+                tooltip=f"{row['Desa']} – {row['Poktan']}",
+                popup=f"<b>Desa:</b> {row['Desa']}<br><b>Poktan:</b> {row['Poktan']}"
+            ).add_to(marker_cluster)
 
-    elif menu == "Peta GIS Lanjutan":
-        st.title("🗺️ Peta GIS Lanjutan – Sabda Tani Geo-Intelligence")
-        m = gis_advanced_map(data)
-        st_folium(m, width=900, height=600)
+    st_folium(m, width=900, height=600)
 
-    elif menu == "Export PDF":
-        kec = st.selectbox("Pilih Kecamatan", list(data.keys()))
-        desa = st.selectbox("Pilih Desa", list(data[kec].keys()))
-        poktan_list = data[kec][desa]
 
-        df_desa = pd.DataFrame(
-            {"Desa": list(data[kec].keys()), "Jumlah Poktan": [len(data[kec][d]) for d in data[kec].keys()]}
-        )
+# ================================================================
+#  DATA POKTAN
+# ================================================================
+elif menu == "Data Poktan":
+    st.title("📋 Data Poktan Sabda Tani")
 
-        if st.button("Generate PDF"):
-            pdf = export_pdf_full(kec, desa, poktan_list, df_desa)
-            with open(pdf, "rb") as f:
-                st.download_button("Download PDF", f, file_name=pdf)
+    kec_select = st.selectbox("Pilih Kecamatan", df_merged["Kecamatan"].unique())
+    desa_select = st.selectbox("Pilih Desa", df_merged[df_merged["Kecamatan"] == kec_select]["Desa"].unique())
 
-else:
-    st.info("Upload file Excel terlebih dahulu.")
+    sub = df_merged[(df_merged["Kecamatan"] == kec_select) & (df_merged["Desa"] == desa_select)]
+
+    st.dataframe(sub[["Desa", "Poktan"]])
+
+
+# ================================================================
+#  EXPORT PDF
+# ================================================================
+elif menu == "Export PDF":
+    st.title("📄 Export Laporan PDF")
+
+    pdf_buffer = generate_pdf(df_merged)
+
+    b64 = base64.b64encode(pdf_buffer.read()).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Laporan_SabdaTani.pdf">📥 Download PDF</a>'
+
+    st.markdown(href, unsafe_allow_html=True)
+
 
 
