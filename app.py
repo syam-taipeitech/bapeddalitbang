@@ -118,9 +118,13 @@ def generate_pdf(df):
 st.sidebar.title("🌿 Sabda Tani Dashboard")
 menu = st.sidebar.radio(
     "Navigasi",
-    ["Dashboard Utama", "Data Gapoktan", "Export PDF"]
+    [
+        "Dashboard Utama",
+        "Detail Per Kecamatan",
+        "Data Gapoktan",
+        "Export PDF"
+    ]
 )
-
 
 # ================================================================
 #  DASHBOARD UTAMA
@@ -145,6 +149,51 @@ if menu == "Dashboard Utama":
                  title="Distribusi Gapoktan per Kecamatan")
     st.plotly_chart(fig, use_container_width=True)
 
+# ================================================================
+#  DASHBOARD DETAIL (PER KECAMATAN → DESA → GAPOKTAN)
+# ================================================================
+elif menu == "Detail Per Kecamatan":
+    st.title("📍 Detail Kecamatan → Desa → Gapoktan")
+
+    # Pilih Kecamatan
+    kec_select = st.selectbox("Pilih Kecamatan", df_final["Kecamatan"].unique())
+
+    # Filter desa berdasarkan kecamatan
+    desa_list = df_final[df_final["Kecamatan"] == kec_select]["Desa"].unique()
+    desa_select = st.selectbox("Pilih Desa", desa_list)
+
+    # Tampilkan gapoktan per desa
+    hasil = df_final[
+        (df_final["Kecamatan"] == kec_select) &
+        (df_final["Desa"] == desa_select)
+    ]
+
+    st.subheader(f"📌 Gapoktan di Desa {desa_select}")
+    st.dataframe(hasil[["Gapoktan"]])
+
+    # Kartu / Card
+    for _, row in hasil.iterrows():
+        st.markdown(
+            f"""
+            <div class='kpi-card'>
+                <h3>{row['Gapoktan']}</h3>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Grafik batang per desa
+    st.subheader("📊 Grafik Jumlah Gapoktan per Desa (Hanya Desa Terpilih)")
+
+    fig = px.bar(
+        hasil,
+        x="Desa",
+        y=[1] * len(hasil),  # karena per desa jumlah gapoktan = n baris
+        title=f"Jumlah Gapoktan di {desa_select}",
+        labels={"y": "Jumlah Gapoktan"},
+        color_discrete_sequence=["#16a34a"]
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ================================================================
