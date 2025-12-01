@@ -14,111 +14,103 @@ import plotly.express as px
 st.set_page_config(page_title="SABDA TANI - Multi Level Dashboard", layout="wide")
 
 # =====================================================
-#  LOAD PREMIUM CSS
+#  LOAD CUSTOM CSS PREMIUM
 # =====================================================
 with open("sabdatani.css") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
 # =====================================================
-#  LOAD DATA EXCEL (data1.xlsx)
+#  PARSER BARU (Kecamatan → Desa → Banyak Gapoktan)
 # =====================================================
 @st.cache_data
 def load_data():
+    # Baca file Excel
     df_raw = pd.read_excel("data1.xlsx", header=None)
 
     result = []
 
-    for i, row in df_raw.iterrows():
+    # Kolom A = Kecamatan
+    kecamatan = str(df_raw.iloc[0, 0]).strip()
 
-        kecamatan = str(row.iloc[0]).strip()      # Kolom A
+    # Kolom B–M = Nama desa (header)
+    desa_headers = df_raw.iloc[0, 1:13].tolist()
 
-        # DESA: kolom B–M (12 kolom)
-        desa_list = [
-            str(x).strip()
-            for x in row.iloc[1:13]
-            if pd.notna(x) and str(x).strip() != ""
-        ]
+    # Proses setiap desa berdasarkan kolom
+    for col_idx, desa_name in enumerate(desa_headers, start=1):
 
-        # GAPOKTAN: kolom N–GC (SEMUA GAPOKTAN untuk SEMUA DESA)
+        if pd.isna(desa_name) or str(desa_name).strip() == "":
+            continue
+
+        desa_name = str(desa_name).strip()
+
+        # Ambil seluruh gapoktan di bawah kolom desa ini
+        gapoktan_col = df_raw.iloc[1:, col_idx]  # mulai dari baris kedua
+
         gapoktan_list = [
             str(x).strip()
-            for x in row.iloc[13:]
+            for x in gapoktan_col
             if pd.notna(x) and str(x).strip() != ""
         ]
 
-        # -----------------------------
-        # SETIAP DESA punya SEMUA GAPOKTAN
-        # -----------------------------
-        for desa in desa_list:
-            for gap in gapoktan_list:
-                result.append([kecamatan, desa, gap])
+        # Simpan data desa → semua gapoktan
+        for gap in gapoktan_list:
+            result.append([kecamatan, desa_name, gap])
 
+    # Jadikan DataFrame
     df = pd.DataFrame(result, columns=["Kecamatan", "Desa", "Gapoktan"])
-
-    # CLEANING
-    df = df[df["Kecamatan"].notna() & (df["Kecamatan"] != "")]
-    df = df[df["Desa"].notna() & (df["Desa"] != "")]
-    df = df[df["Gapoktan"].notna() & (df["Gapoktan"] != "")]
-    df = df.reset_index(drop=True)
 
     return df
 
 
+# Load data
 df = load_data()
 
 # =====================================================
 #  TITLE
 # =====================================================
 st.markdown("""
-<h1 class='title-main'>🌾 SABDA TANI – Dashboard Multi-Level (Kecamatan → Desa → Gapoktan)</h1>
+<h1 class='title-main'>🌾 SABDA TANI – Dashboard Multi-Level</h1>
+<h3>Kecamatan → Desa → Daftar Gapoktan</h3>
 """, unsafe_allow_html=True)
 
-
 # =====================================================
-#  MULTI-LEVEL SELECTION
+#  MULTI-LEVEL SELECTOR
 # =====================================================
-st.subheader("🔎 Drill Down: Kecamatan → Desa → Gapoktan")
 
-# 1️⃣ PILIH KECAMATAN
-kecamatan_select = st.selectbox(
-    "Pilih Kecamatan",
-    df["Kecamatan"].unique()
-)
+st.subheader("🔎 Drill Down Data")
 
-# 2️⃣ PILIH DESA SESUAI KECAMATAN
+# Karena hanya 1 kecamatan pada data1, tampilkan otomatis
+kecamatan_name = df["Kecamatan"].unique()[0]
+st.markdown(f"### 🏞 Kecamatan: **{kecamatan_name}**")
+
+# PILIH DESA
 desa_select = st.selectbox(
     "Pilih Desa",
-    df[df["Kecamatan"] == kecamatan_select]["Desa"].unique()
+    df["Desa"].unique()
 )
 
-# 3️⃣ AMBIL NAMA GAPOKTAN UNTUK DESA INI
-filtered = df[
-    (df["Kecamatan"] == kecamatan_select) &
-    (df["Desa"] == desa_select)
-]
+# FILTER GAPOKTAN PER DESA
+filtered = df[df["Desa"] == desa_select]
 
+# =====================================================
+#  Tampilkan Gapoktan
+# =====================================================
 st.markdown(f"""
-### 📍 Desa: **{desa_select}**  
-### 🏞 Kecamatan: **{kecamatan_select}**  
-### 🌱 Jumlah Gapoktan: **{len(filtered)}**
+### 🌱 Daftar Gapoktan di **{desa_select}**
+Jumlah Gapoktan: **{len(filtered)}**
 """)
 
-# ================================================
-#  TABEL GAPOKTAN
-# ================================================
 st.table(filtered[["Gapoktan"]].reset_index(drop=True))
 
-# ================================================
-#  KARTU PREMIUM GAPOKTAN
-# ================================================
-st.markdown("### 🌿 Daftar Gapoktan (Kartu Premium)")
+# =====================================================
+#  KARTU PREMIUM
+# =====================================================
+st.markdown("### 🌿 Gapoktan (Kartu Premium)")
 
-gap_list = filtered["Gapoktan"].tolist()
 cols = st.columns(3)
-
 i = 0
-for gap in gap_list:
+for gap in filtered["Gapoktan"]:
     with cols[i % 3]:
         st.markdown(
             f"""
@@ -126,32 +118,30 @@ for gap in gap_list:
                 <h3>{gap}</h3>
             </div>
             """,
-            unsafe_allow_html=True,
+            unsafe_allow_html=True
         )
     i += 1
 
-
 # =====================================================
-#  GRAFIK JUMLAH GAPOKTAN PER DESA (DALAM KECAMATAN)
+#  GRAFIK GAPOKTAN PER DESA
 # =====================================================
-st.markdown(f"### 📊 Grafik Jumlah Gapoktan per Desa di Kecamatan {kecamatan_select}")
+st.markdown("### 📊 Grafik Jumlah Gapoktan per Desa")
 
-desa_ct = (
-    df[df["Kecamatan"] == kecamatan_select]
-    .groupby("Desa")
+desa_count = (
+    df.groupby("Desa")
     .size()
     .reset_index(name="Jumlah Gapoktan")
+    .sort_values("Jumlah Gapoktan", ascending=False)
 )
 
 fig = px.bar(
-    desa_ct,
+    desa_count,
     x="Desa",
     y="Jumlah Gapoktan",
     color="Jumlah Gapoktan",
-    title=f"Jumlah Gapoktan per Desa – Kecamatan {kecamatan_select}",
+    title="Perbandingan Jumlah Gapoktan per Desa",
     color_continuous_scale="Greens",
 )
 
 st.plotly_chart(fig, use_container_width=True)
-
 
