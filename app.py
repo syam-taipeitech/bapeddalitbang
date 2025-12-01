@@ -27,56 +27,79 @@ st.set_page_config(page_title="Dashboard Sabda Tani – Gapoktan", layout="wide"
 # ================================
 # LOAD DATA
 # ================================
-data1 = pd.read_excel("data1.xlsx")    # berisi kecamatan & desa
-data2 = pd.read_excel("data2.xlsx")    # berisi desa & gapoktan
+data1 = pd.read_excel("data1.xlsx")
+data2 = pd.read_excel("data2.xlsx")
 
 # ================================
-# DETEKSI KOLOM OTOMATIS
+# DETEKSI KOLOM data1 (kecamatan – desa)
 # ================================
-cols1 = [c.lower().strip() for c in data1.columns]
-
 kec_col = None
-desa_col = None
+desa1_col = None
 
 for c in data1.columns:
     name = c.lower().strip()
     if "kec" in name:
         kec_col = c
     if "desa" in name:
-        desa_col = c
+        desa1_col = c
 
-# Jika gagal deteksi → tampilkan error
 if kec_col is None:
-    st.error("❌ Kolom kecamatan tidak ditemukan di data1.xlsx")
+    st.error("❌ Tidak ditemukan kolom kecamatan di data1.xlsx")
     st.stop()
 
-if desa_col is None:
-    st.error("❌ Kolom desa tidak ditemukan di data1.xlsx")
+if desa1_col is None:
+    st.error("❌ Tidak ditemukan kolom desa di data1.xlsx")
+    st.stop()
+
+# ================================
+# DETEKSI KOLOM data2 (desa – gapoktan)
+# ================================
+desa2_col = None
+gap_col = None
+
+for c in data2.columns:
+    name = c.lower().strip()
+    if "desa" in name:
+        desa2_col = c
+    if "gap" in name:
+        gap_col = c
+
+if desa2_col is None:
+    st.error("❌ Tidak ditemukan kolom desa di data2.xlsx")
+    st.stop()
+
+if gap_col is None:
+    st.error("❌ Tidak ditemukan kolom gapoktan di data2.xlsx")
     st.stop()
 
 # ================================
 # BERSIHKAN DATA
 # ================================
 data1[kec_col] = data1[kec_col].astype(str).str.strip()
-data1[desa_col] = data1[desa_col].astype(str).str.strip()
+data1[desa1_col] = data1[desa1_col].astype(str).str.strip()
 
-data2["desa"] = data2["desa"].astype(str).str.strip()
-data2["gapoktan"] = data2["gapoktan"].astype(str).str.strip()
-
-# ================================
-# MERGE → Kecamatan – Desa – Gapoktan
-# ================================
-merged = data1.merge(data2, left_on=desa_col, right_on="desa", how="left")
+data2[desa2_col] = data2[desa2_col].astype(str).str.strip()
+data2[gap_col] = data2[gap_col].astype(str).str.strip()
 
 # ================================
-# BANGUN HIERARKI
+# MERGE data1 + data2
+# ================================
+merged = data1.merge(
+    data2,
+    left_on=desa1_col,
+    right_on=desa2_col,
+    how="left"
+)
+
+# ================================
+# BANGUN HIERARKI (kecamatan → desa → gapoktan)
 # ================================
 data_hierarchy = {}
 
 for _, row in merged.iterrows():
     kec = row[kec_col]
-    desa = row[desa_col]
-    gap = row["gapoktan"]
+    desa = row[desa1_col]
+    gap = row[gap_col]
 
     if kec not in data_hierarchy:
         data_hierarchy[kec] = {}
@@ -84,8 +107,9 @@ for _, row in merged.iterrows():
     if desa not in data_hierarchy[kec]:
         data_hierarchy[kec][desa] = []
 
-    if pd.notna(gap):  # hanya tambahkan gapoktan yang ada datanya
+    if pd.notna(gap):
         data_hierarchy[kec][desa].append(gap)
+
 
 # ================================
 # LIST KECAMATAN
