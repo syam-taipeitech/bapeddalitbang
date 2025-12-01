@@ -135,21 +135,22 @@ st.markdown("### 🔎 Detail Gapoktan per Kecamatan & Desa")
 
 c1, c2 = st.columns(2)
 
-# Dropdown Kecamatan
-kec_select = c1.selectbox("Pilih Kecamatan", sorted(data_hierarchy.keys()))
+# --- Dropdown Kecamatan Menggunakan List Bersih dari Excel ---
+kec_select = c1.selectbox("Pilih Kecamatan", sorted(list_kecamatan_clean))
 
-# Dropdown Desa sesuai kecamatan
-desa_select = c2.selectbox("Pilih Desa", sorted(data_hierarchy[kec_select].keys()))
+# --- Desa mengikuti kecamatan terpilih ---
+desa_list = sorted(data_hierarchy[kec_select].keys())
+desa_select = c2.selectbox("Pilih Desa", desa_list)
 
-# Tampilkan Gapoktan
 gapoktan_list = data_hierarchy[kec_select][desa_select]
 
 st.markdown(f"### 🌱 Daftar Gapoktan – **{desa_select}**")
 
 if len(gapoktan_list) == 0:
-    st.info("Tidak ada data gapoktan di desa ini.")
+    st.info("Tidak ada data gapoktan untuk desa ini.")
 else:
     for g in gapoktan_list:
         st.markdown(f"- {g}")
+
 
 
