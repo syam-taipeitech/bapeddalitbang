@@ -24,7 +24,7 @@ with open("sabdatani.css") as f:
 # ================================
 @st.cache_data
 def load_excel():
-    df_raw = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx", header=None)
+    df_raw = pd.read_excel("data1.xlsx", header=None)
 
     # Kolom A = Kecamatan
     kecamatan_series = df_raw.iloc[:, 0].dropna().reset_index(drop=True)
