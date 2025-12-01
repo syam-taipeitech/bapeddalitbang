@@ -149,6 +149,22 @@ if menu == "Per Desa":
         color_continuous_scale="Greens",
     )
     st.plotly_chart(fig, use_container_width=True)
+# ============================================================
+# 4) GAPOKTAN PER DESA (PARSED FROM COLUMN N–GC)
+# ============================================================
+st.subheader("🌿 Nama Gapoktan per Desa")
+
+kec_select2 = st.selectbox("Pilih Kecamatan (Gapoktan per Desa)", df["Kecamatan"].unique(), key="gap1")
+
+# Filter desa sesuai kecamatan
+desa_options2 = df[df["Kecamatan"] == kec_select2]["Desa"].unique()
+desa_select2 = st.selectbox("Pilih Desa", desa_options2, key="gap2")
+
+# Ambil gapoktan sesuai desa
+gap_filtered = df[(df["Kecamatan"] == kec_select2) & (df["Desa"] == desa_select2)]
+
+st.markdown(f"### 📌 Daftar Gapoktan di **{desa_select2}**, Kecamatan **{kec_select2}**")
+st.table(gap_filtered[["Gapoktan"]].reset_index(drop=True))
 
 # ================================
 # 3) PER GAPOKTAN
