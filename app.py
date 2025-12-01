@@ -33,7 +33,7 @@ else:
 # ================================================================
 @st.cache_data
 def load_data():
-    df_raw = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx")
+    df_raw = pd.read_excel("data1.xlsx")
     return df_raw
 
 df_raw = load_data()
