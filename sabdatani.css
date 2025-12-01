@@ -40,3 +40,21 @@ body, input, label, .stTextInput, .stSelectbox {
 .stMarkdown {
     font-size: 18px;
 }
+.card-summary {
+    background: linear-gradient(135deg, #d4af37, #f7e98e);
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    color: #222;
+    font-weight: bold;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.2);
+}
+
+.card-small {
+    background: #ffffffaa;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    border-left: 6px solid #4CAF50;
+}
+
