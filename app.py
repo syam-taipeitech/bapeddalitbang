@@ -21,7 +21,7 @@ with open("sabdatani.css") as f:
 
 
 # =====================================================
-#  LOAD DATA EXCEL data1.xlsx
+#  LOAD DATA EXCEL (data1.xlsx)
 # =====================================================
 @st.cache_data
 def load_data():
@@ -31,30 +31,28 @@ def load_data():
 
     for i, row in df_raw.iterrows():
 
-        kecamatan = str(row.iloc[0]).strip()  # kolom A
+        kecamatan = str(row.iloc[0]).strip()      # Kolom A
 
-        # kolom B–M = Desa (12 kolom)
+        # DESA: kolom B–M (12 kolom)
         desa_list = [
             str(x).strip()
             for x in row.iloc[1:13]
             if pd.notna(x) and str(x).strip() != ""
         ]
 
-        # kolom N–GC = Gapoktan (semua kolom setelah desa)
+        # GAPOKTAN: kolom N–GC (SEMUA GAPOKTAN untuk SEMUA DESA)
         gapoktan_list = [
             str(x).strip()
             for x in row.iloc[13:]
             if pd.notna(x) and str(x).strip() != ""
         ]
 
-        # pairing: desa[i] → gapoktan[i]
-        for idx, desa in enumerate(desa_list):
-            if idx < len(gapoktan_list):
-                gap = gapoktan_list[idx]
-            else:
-                gap = None
-
-            result.append([kecamatan, desa, gap])
+        # -----------------------------
+        # SETIAP DESA punya SEMUA GAPOKTAN
+        # -----------------------------
+        for desa in desa_list:
+            for gap in gapoktan_list:
+                result.append([kecamatan, desa, gap])
 
     df = pd.DataFrame(result, columns=["Kecamatan", "Desa", "Gapoktan"])
 
@@ -73,12 +71,12 @@ df = load_data()
 #  TITLE
 # =====================================================
 st.markdown("""
-<h1 class='title-main'>🌾 SABDA TANI – Dashboard Multi-Level</h1>
+<h1 class='title-main'>🌾 SABDA TANI – Dashboard Multi-Level (Kecamatan → Desa → Gapoktan)</h1>
 """, unsafe_allow_html=True)
 
 
 # =====================================================
-#  MULTI-LEVEL: KECAMATAN → DESA → GAPOKTAN
+#  MULTI-LEVEL SELECTION
 # =====================================================
 st.subheader("🔎 Drill Down: Kecamatan → Desa → Gapoktan")
 
@@ -94,7 +92,7 @@ desa_select = st.selectbox(
     df[df["Kecamatan"] == kecamatan_select]["Desa"].unique()
 )
 
-# 3️⃣ TAMPILKAN GAPOKTAN SESUAI DESA
+# 3️⃣ AMBIL NAMA GAPOKTAN UNTUK DESA INI
 filtered = df[
     (df["Kecamatan"] == kecamatan_select) &
     (df["Desa"] == desa_select)
@@ -102,19 +100,21 @@ filtered = df[
 
 st.markdown(f"""
 ### 📍 Desa: **{desa_select}**  
-### 🏞 Kecamatan: **{kecamatan_select}**
+### 🏞 Kecamatan: **{kecamatan_select}**  
+### 🌱 Jumlah Gapoktan: **{len(filtered)}**
 """)
 
-# Display table
+# ================================================
+#  TABEL GAPOKTAN
+# ================================================
 st.table(filtered[["Gapoktan"]].reset_index(drop=True))
 
+# ================================================
+#  KARTU PREMIUM GAPOKTAN
+# ================================================
+st.markdown("### 🌿 Daftar Gapoktan (Kartu Premium)")
 
-# =====================================================
-#  DISPLAY AS PREMIUM CARDS
-# =====================================================
-st.markdown("### 🌿 Daftar Gapoktan")
 gap_list = filtered["Gapoktan"].tolist()
-
 cols = st.columns(3)
 
 i = 0
@@ -132,11 +132,11 @@ for gap in gap_list:
 
 
 # =====================================================
-#  OPTIONAL: GRAFIK PER DESA
+#  GRAFIK JUMLAH GAPOKTAN PER DESA (DALAM KECAMATAN)
 # =====================================================
-st.markdown("### 📊 Grafik Jumlah Gapoktan per Desa (dalam Kecamatan yang Dipilih)")
+st.markdown(f"### 📊 Grafik Jumlah Gapoktan per Desa di Kecamatan {kecamatan_select}")
 
-desa_count = (
+desa_ct = (
     df[df["Kecamatan"] == kecamatan_select]
     .groupby("Desa")
     .size()
@@ -144,16 +144,14 @@ desa_count = (
 )
 
 fig = px.bar(
-    desa_count,
+    desa_ct,
     x="Desa",
     y="Jumlah Gapoktan",
     color="Jumlah Gapoktan",
+    title=f"Jumlah Gapoktan per Desa – Kecamatan {kecamatan_select}",
     color_continuous_scale="Greens",
-    title=f"Jumlah Gapoktan di Kecamatan {kecamatan_select}",
 )
 
 st.plotly_chart(fig, use_container_width=True)
-
-
 
 
