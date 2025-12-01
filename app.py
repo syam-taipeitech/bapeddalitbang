@@ -27,34 +27,55 @@ st.set_page_config(page_title="Dashboard Sabda Tani – Gapoktan", layout="wide"
 # ================================
 # LOAD DATA
 # ================================
-# data1 = kecamatan–desa
-# data2 = desa–gapoktan
-data1 = pd.read_excel("data1.xlsx")
-data2 = pd.read_excel("data2.xlsx")
+data1 = pd.read_excel("data1.xlsx")    # berisi kecamatan & desa
+data2 = pd.read_excel("data2.xlsx")    # berisi desa & gapoktan
+
+# ================================
+# DETEKSI KOLOM OTOMATIS
+# ================================
+cols1 = [c.lower().strip() for c in data1.columns]
+
+kec_col = None
+desa_col = None
+
+for c in data1.columns:
+    name = c.lower().strip()
+    if "kec" in name:
+        kec_col = c
+    if "desa" in name:
+        desa_col = c
+
+# Jika gagal deteksi → tampilkan error
+if kec_col is None:
+    st.error("❌ Kolom kecamatan tidak ditemukan di data1.xlsx")
+    st.stop()
+
+if desa_col is None:
+    st.error("❌ Kolom desa tidak ditemukan di data1.xlsx")
+    st.stop()
 
 # ================================
 # BERSIHKAN DATA
 # ================================
-data1["kecamatan"] = data1["kecamatan"].astype(str).str.strip()
-data1["desa"] = data1["desa"].astype(str).str.strip()
+data1[kec_col] = data1[kec_col].astype(str).str.strip()
+data1[desa_col] = data1[desa_col].astype(str).str.strip()
 
 data2["desa"] = data2["desa"].astype(str).str.strip()
 data2["gapoktan"] = data2["gapoktan"].astype(str).str.strip()
 
 # ================================
-# MERGE untuk hasil lengkap kecamatan–desa–gapoktan
+# MERGE → Kecamatan – Desa – Gapoktan
 # ================================
-merged = data1.merge(data2, on="desa", how="left")
+merged = data1.merge(data2, left_on=desa_col, right_on="desa", how="left")
 
 # ================================
-# BANGUN HIERARKI:
-# Kecamatan → Desa → Gapoktan
+# BANGUN HIERARKI
 # ================================
 data_hierarchy = {}
 
 for _, row in merged.iterrows():
-    kec = row["kecamatan"]
-    desa = row["desa"]
+    kec = row[kec_col]
+    desa = row[desa_col]
     gap = row["gapoktan"]
 
     if kec not in data_hierarchy:
@@ -63,13 +84,14 @@ for _, row in merged.iterrows():
     if desa not in data_hierarchy[kec]:
         data_hierarchy[kec][desa] = []
 
-    if pd.notna(gap):
+    if pd.notna(gap):  # hanya tambahkan gapoktan yang ada datanya
         data_hierarchy[kec][desa].append(gap)
 
 # ================================
-# LIST KECAMATAN BERSIH
+# LIST KECAMATAN
 # ================================
 list_kecamatan_clean = sorted(list(data_hierarchy.keys()))
+
 
 # ================================
 # DASHBOARD HEADER
@@ -82,13 +104,11 @@ st.markdown("""
 
 
 # ================================
-# HITUNG KPI
+# KPI SUMMARY
 # ================================
 total_kec = len(data_hierarchy)
-
-total_desa = merged["desa"].nunique()
-
-total_gapoktan = merged["gapoktan"].nunique()
+total_desa = len(merged[desa_col].unique())
+total_gapoktan = len(merged["gapoktan"].dropna().unique())
 
 col1, col2, col3 = st.columns(3)
 
@@ -117,15 +137,14 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 
 # ================================
-# GRAFIK GAPOKTAN PER KECAMATAN
+# GRAFIK – GAPOKTAN PER KECAMATAN
 # ================================
 st.markdown("### 📊 Jumlah Gapoktan per Kecamatan")
 
 chart_kec = []
-
 for kec in data_hierarchy:
-    total_g = sum(len(g_list) for g_list in data_hierarchy[kec].values())
-    chart_kec.append({"kecamatan": kec, "gapoktan": total_g})
+    jumlah_g = sum(len(g_list) for g_list in data_hierarchy[kec].values())
+    chart_kec.append({"kecamatan": kec, "gapoktan": jumlah_g})
 
 df_chart = pd.DataFrame(chart_kec)
 
@@ -147,21 +166,20 @@ st.markdown("### 🔎 Detail Gapoktan per Kecamatan & Desa")
 
 c1, c2 = st.columns(2)
 
-# Pilih kecamatan
+# PILIH KECAMATAN
 kec_select = c1.selectbox(
     "Pilih Kecamatan",
     list_kecamatan_clean
 )
 
-# Pilih desa sesuai kecamatan
+# PILIH DESA
 desa_list = sorted(list(data_hierarchy[kec_select].keys()))
-
 desa_select = c2.selectbox(
     "Pilih Desa",
     desa_list
 )
 
-# Ambil gapoktan
+# TAMPILKAN GAPOKTAN
 gapoktan_list = data_hierarchy[kec_select][desa_select]
 
 st.markdown(f"### 🌱 Daftar Gapoktan – **{desa_select}**")
@@ -171,4 +189,5 @@ if len(gapoktan_list) == 0:
 else:
     for g in gapoktan_list:
         st.markdown(f"- {g}")
+
 
