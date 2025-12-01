@@ -1,0 +1,26 @@
+body {
+    background-color: #f1f8f4;
+}
+
+.sidebar .sidebar-content {
+    background: linear-gradient(180deg, #2e7d32, #1b5e20);
+    color: white;
+}
+
+.css-1d391kg {
+    background-color: #e8f5e9 !important;
+    border-radius: 12px;
+    padding: 20px;
+}
+
+h1, h2, h3, h4 {
+    color: #1b5e20 !important;
+}
+
+.stMetric {
+    background: #e8f5e9;
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
