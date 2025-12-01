@@ -136,7 +136,7 @@ st.markdown("### 🔎 Detail Gapoktan per Kecamatan & Desa")
 c1, c2 = st.columns(2)
 
 # --- Dropdown Kecamatan Menggunakan List Bersih dari Excel ---
-kec_select = c1.selectbox("Pilih Kecamatan", sorted(list_kecamatan_clean))
+kec_select = c1.selectbox("Pilih Kecamatan", sorted(list_kecamatan_))
 
 # --- Desa mengikuti kecamatan terpilih ---
 desa_list = sorted(data_hierarchy[kec_select].keys())
