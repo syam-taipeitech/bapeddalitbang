@@ -10,208 +10,304 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import folium
+from streamlit_folium import st_folium
+from folium.plugins import HeatMap, MarkerCluster
+from geopy.geocoders import Nominatim
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+import plotly.io as pio
+import uuid
 
-st.set_page_config(page_title="Dashboard Poktan Pacitan", layout="wide")
+# ============================
+# LOAD CSS
+# ============================
+with open("sabdatani.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-# ===========================
-# LOAD DATA
-# ===========================
+# ============================
+# GEOCODER
+# ============================
+geolocator = Nominatim(user_agent="sabdatani")
+
 @st.cache_data
-def load_data():
-    df = pd.read_csv("poktan_clean.csv")
-    df["tipe"] = df["nama_poktan"].apply(
-        lambda x: "KWT" if "kwt" in str(x).lower() else "Poktan"
+def geo_address(address):
+    try:
+        loc = geolocator.geocode(f"{address}, Pacitan, Indonesia")
+        if loc:
+            return loc.latitude, loc.longitude
+    except:
+        return None
+    return None
+
+# ============================
+# LOAD EXCEL (2-sheet parser)
+# ============================
+@st.cache_data
+def load_excel(file):
+    xls = pd.ExcelFile(file)
+
+    # Sheet 1 = Kecamatan & Desa (ambil sheet pertama)
+    df_kecdesa = pd.read_excel(file, sheet_name=xls.sheet_names[0], header=None)
+
+    # Sheet 2 = Data Poktan List
+    df_poktan = pd.read_excel(file, sheet_name="Data Poktan List")
+
+    return df_kecdesa, df_poktan
+
+
+# ============================
+# PARSER: Kecamatan → Desa
+# ============================
+def parse_kecamatan_desa(df):
+    data = {}
+    for idx, row in df.iterrows():
+        if idx == 0:
+            continue
+        kec = str(row[0]).strip()
+        if kec == "" or kec.lower() == "nan":
+            continue
+
+        desa_list = []
+        for col in row[1:]:
+            if pd.isna(col):
+                continue
+            desa_list.append(str(col).strip())
+
+        data[kec] = desa_list
+    return data
+
+
+# ============================
+# PARSER: Desa → Poktan
+# ============================
+def parse_desa_poktan(df):
+    desa_poktan = {}
+
+    for col in df.columns:
+        desa_name = col.strip()
+        poktan_list = df[col].dropna().astype(str).tolist()
+        desa_poktan[desa_name] = poktan_list
+
+    return desa_poktan
+
+
+# ============================
+# BUILD MASTER STRUCTURE
+# ============================
+def build_structure(kec_desa, desa_poktan):
+    structure = {}
+
+    for kec, desa_list in kec_desa.items():
+        structure[kec] = {}
+        for desa in desa_list:
+            if desa in desa_poktan:
+                structure[kec][desa] = desa_poktan[desa]
+            else:
+                structure[kec][desa] = []
+    return structure
+
+
+# ============================
+# CHART FUNCTIONS
+# ============================
+def chart_desa_per_kecamatan(df):
+    fig = px.bar(
+        df, x="Kecamatan", y="Jumlah Desa",
+        color="Jumlah Desa", text="Jumlah Desa",
+        color_continuous_scale="Greens",
+        title="📌 Jumlah Desa per Kecamatan"
     )
-    return df
+    return fig
 
-df = load_data()
+def chart_poktan_per_kecamatan(df):
+    fig = px.bar(
+        df, x="Kecamatan", y="Jumlah Poktan",
+        color="Jumlah Poktan", text="Jumlah Poktan",
+        color_continuous_scale="Greens",
+        title="🌿 Jumlah Poktan per Kecamatan"
+    )
+    return fig
 
-# ======================================================
-# PARSER MULTI-POKTAN PER DESA
-# nama_poktan bisa berisi banyak poktan dalam 1 sel
-# dipisah oleh \n / , / ;
-# ======================================================
-def generate_poktan_list(df):
-    poktan_dict = {}
+def chart_poktan_per_desa(df):
+    fig = px.bar(
+        df, x="Desa", y="Jumlah Poktan",
+        color="Jumlah Poktan", text="Jumlah Poktan",
+        color_continuous_scale="Greens",
+        title="🌱 Poktan per Desa"
+    )
+    fig.update_xaxes(tickangle=45)
+    return fig
 
-    for _, row in df.iterrows():
-        kec = str(row["kecamatan"]).strip()
-        desa = str(row["desa"]).strip()
-        poktan_raw = str(row["nama_poktan"]).strip()
 
-        # pisahkan oleh baris baru, koma, atau titik koma
-        for sep in ["\n", ",", ";"]:
-            poktan_raw = poktan_raw.replace(sep, "|")
+# ============================
+# GIS MAP ADVANCED
+# ============================
+def gis_advanced_map(data):
+    m = folium.Map(location=[-8.2, 111.1], zoom_start=10, tiles="CartoDB positron")
+    marker_cluster = MarkerCluster().add_to(m)
+    heat_data = []
 
-        poktan_split = [p.strip() for p in poktan_raw.split("|") if p.strip()]
+    for kec, desa_dict in data.items():
+        for desa, poktans in desa_dict.items():
+            coord = geo_address(desa)
+            if coord:
+                heat_data.append([coord[0], coord[1], len(poktans)])
 
-        # inisialisasi kecamatan
-        if kec not in poktan_dict:
-            poktan_dict[kec] = {}
+                if len(poktans) >= 15:
+                    color = "darkgreen"
+                elif len(poktans) >= 8:
+                    color = "green"
+                else:
+                    color = "lightgreen"
 
-        # inisialisasi desa
-        if desa not in poktan_dict[kec]:
-            poktan_dict[kec][desa] = []
+                folium.Marker(
+                    coord,
+                    popup=f"<b>{desa}</b><br>Kecamatan: {kec}<br>Poktan: {len(poktans)}",
+                    icon=folium.Icon(color=color, icon="leaf")
+                ).add_to(marker_cluster)
 
-        # tambahkan poktan
-        for p in poktan_split:
-            if p not in poktan_dict[kec][desa]:
-                poktan_dict[kec][desa].append(p)
+    HeatMap(heat_data, radius=25, blur=15).add_to(m)
+    folium.LayerControl().add_to(m)
+    return m
 
-    return poktan_dict
 
-poktan_list = generate_poktan_list(df)
-# ===========================
-# SIDEBAR MENU
-# ===========================
-menu = st.sidebar.selectbox(
-    "Pilih Menu Visualisasi",
-    [
-        "Dashboard Utama",
-        "Poktan per Kecamatan",
-        "Poktan per Desa",
-        "Top Desa Teraktif",
-        "KWT vs Poktan",
-        "Detail Poktan",
-        "Tabel Data"
-    ]
+# ============================
+# EXPORT PDF MULTI-HALAMAN
+# ============================
+def export_pdf_full(kec, desa, poktan_list, df_desa):
+    filename = f"Laporan_{kec}_{desa}.pdf"
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(filename, pagesize=A4)
+    story = []
+
+    # Cover
+    story.append(Paragraph("<b><font size=24>SABDA TANI</font></b>", styles["Title"]))
+    story.append(Paragraph("Laporan Kelembagaan Pertanian", styles["Heading2"]))
+    story.append(Spacer(1, 20))
+    story.append(Paragraph(f"Kecamatan: {kec}", styles["Normal"]))
+    story.append(Paragraph(f"Desa: {desa}", styles["Normal"]))
+    story.append(Paragraph(f"Jumlah Poktan: {len(poktan_list)}", styles["Normal"]))
+    story.append(PageBreak())
+
+    # Tabel Desa
+    story.append(Paragraph("<b>Daftar Desa dan Jumlah Poktan</b>", styles["Heading2"]))
+    table_data = [["Desa", "Jumlah Poktan"]] + df_desa.values.tolist()
+
+    table = Table(table_data, colWidths=[200, 200])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgreen),
+        ("GRID", (0,0), (-1,-1), 1, colors.grey),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # Poktan List
+    story.append(Paragraph("<b>Daftar Poktan</b>", styles["Heading2"]))
+    for p in poktan_list:
+        story.append(Paragraph(f"- {p}", styles["Normal"]))
+    story.append(PageBreak())
+
+    # Rekomendasi
+    story.append(Paragraph("<b>Rekomendasi</b>", styles["Heading2"]))
+    story.append(Paragraph("""
+    1. Penguatan kelembagaan desa sangat penting untuk stabilitas produksi.<br/>
+    2. Perlu pembinaan berkelanjutan untuk poktan beranggotakan sedikit.<br/>
+    3. Integrasikan sistem Sabda Tani untuk monitoring penyakit & NPK.<br/>
+    """, styles["Normal"]))
+
+    doc.build(story)
+    return filename
+
+
+# ============================
+# STREAMLIT UI
+# ============================
+st.sidebar.title("🌾 Sabda Tani Dashboard")
+uploaded = st.sidebar.file_uploader("Upload File Excel", type=["xlsx"])
+
+menu = st.sidebar.radio("Menu",
+    ["Dashboard Utama", "Kecamatan", "Desa", "Detail Poktan", "Treemap Hierarki", "Peta GIS", "Peta GIS Lanjutan", "Export PDF"]
 )
 
-st.sidebar.info("Dashboard Kelembagaan Pertanian — Sabda Tani 2025")
-st.sidebar.write("Data dari poktan_clean.csv")
+if uploaded:
+    df1, df2 = load_excel(uploaded)
 
+    kec_desa = parse_kecamatan_desa(df1)
+    desa_poktan = parse_desa_poktan(df2)
+    data = build_structure(kec_desa, desa_poktan)
 
-# ===========================
-# HALAMAN – DASHBOARD UTAMA
-# ===========================
-if menu == "Dashboard Utama":
-    st.title("📊 Dashboard Kelembagaan Poktan Kabupaten Pacitan")
+    if menu == "Dashboard Utama":
+        st.title("🌿 Dashboard Utama Sabda Tani")
 
-    total_kec = df["kecamatan"].nunique()
-    total_desa = df["desa"].nunique()
-    total_poktan = sum(len(p_list) for kec in poktan_list.values() for p_list in kec.values())
+        total_kec = len(data)
+        total_desa = sum(len(v) for v in data.values())
+        total_poktan = sum(len(vv) for v in data.values() for vv in v.values())
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Kecamatan", total_kec)
-    col2.metric("Total Desa", total_desa)
-    col3.metric("Total Poktan", total_poktan)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Kecamatan", total_kec)
+        c2.metric("Total Desa", total_desa)
+        c3.metric("Total Poktan", total_poktan)
 
-    # Grafik poktan per kecamatan
-    per_kec = []
-    for kec, desa_dict in poktan_list.items():
-        count = sum(len(p) for p in desa_dict.values())
-        per_kec.append([kec, count])
+        df_desa = pd.DataFrame(
+            {"Kecamatan": list(kec_desa.keys()),
+             "Jumlah Desa": [len(v) for v in kec_desa.values()]}
+        )
 
-    per_kec_df = pd.DataFrame(per_kec, columns=["kecamatan", "jumlah_poktan"])
+        df_poktan = pd.DataFrame(
+            {"Kecamatan": list(kec_desa.keys()),
+             "Jumlah Poktan": [sum(len(data[k][d]) for d in data[k]) for k in data.keys()]}
+        )
 
-    fig = px.bar(
-        per_kec_df,
-        x="kecamatan",
-        y="jumlah_poktan",
-        text="jumlah_poktan",
-        title="📌 Jumlah Poktan per Kecamatan"
-    )
+        st.plotly_chart(chart_desa_per_kecamatan(df_desa), use_container_width=True)
+        st.plotly_chart(chart_poktan_per_kecamatan(df_poktan), use_container_width=True)
 
-    st.plotly_chart(fig, use_container_width=True)
+    elif menu == "Kecamatan":
+        kec = st.selectbox("Pilih Kecamatan", list(data.keys()))
+        st.subheader(f"Daftar Desa di {kec}")
+        desa_list = list(data[kec].keys())
+        st.write(desa_list)
 
+        df = pd.DataFrame({"Desa": desa_list, "Jumlah Poktan": [len(data[kec][d]) for d in desa_list]})
+        st.plotly_chart(chart_poktan_per_desa(df), use_container_width=True)
 
-# ===========================
-# HALAMAN – PER KECAMATAN
-# ===========================
-elif menu == "Poktan per Kecamatan":
-    st.title("🏞️ Poktan per Kecamatan")
+    elif menu == "Desa":
+        kec = st.selectbox("Pilih Kecamatan", list(data.keys()))
+        desa = st.selectbox("Pilih Desa", list(data[kec].keys()))
+        st.write(data[kec][desa])
 
-    kec_select = st.selectbox("Pilih Kecamatan", list(poktan_list.keys()))
+    elif menu == "Peta GIS":
+        st.title("🗺️ Peta GIS")
+        m = folium.Map(location=[-8.2, 111.1], zoom_start=10)
+        for kec, desa_dict in data.items():
+            for desa in desa_dict:
+                coord = geo_address(desa)
+                if coord:
+                    folium.Marker(coord, popup=desa).add_to(m)
+        st_folium(m, width=900)
 
-    desa_counts = []
-    for desa, poktans in poktan_list[kec_select].items():
-        desa_counts.append([desa, len(poktans)])
+    elif menu == "Peta GIS Lanjutan":
+        st.title("🗺️ Peta GIS Lanjutan – Sabda Tani Geo-Intelligence")
+        m = gis_advanced_map(data)
+        st_folium(m, width=900, height=600)
 
-    df_desa = pd.DataFrame(desa_counts, columns=["desa", "jumlah_poktan"])
+    elif menu == "Export PDF":
+        kec = st.selectbox("Pilih Kecamatan", list(data.keys()))
+        desa = st.selectbox("Pilih Desa", list(data[kec].keys()))
+        poktan_list = data[kec][desa]
 
-    fig = px.bar(
-        df_desa,
-        x="desa",
-        y="jumlah_poktan",
-        text="jumlah_poktan",
-        title=f"📌 Jumlah Poktan per Desa – {kec_select}"
-    )
+        df_desa = pd.DataFrame(
+            {"Desa": list(data[kec].keys()), "Jumlah Poktan": [len(data[kec][d]) for d in data[kec].keys()]}
+        )
 
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df_desa)
+        if st.button("Generate PDF"):
+            pdf = export_pdf_full(kec, desa, poktan_list, df_desa)
+            with open(pdf, "rb") as f:
+                st.download_button("Download PDF", f, file_name=pdf)
 
-# ================================
-# HALAMAN - PER DESA
-# ================================
-elif menu == "Poktan per Desa":
-    st.title("🏘️ Poktan per Desa")
+else:
+    st.info("Upload file Excel terlebih dahulu.")
 
-    kec_select = st.selectbox("Pilih Kecamatan", list(poktan_list.keys()))
-    desa_select = st.selectbox("Pilih Desa", list(poktan_list[kec_select].keys()))
-
-    poktan_in_desa = poktan_list[kec_select][desa_select]
-
-    st.subheader(f"📋 Daftar Poktan di {desa_select}")
-    st.write(poktan_in_desa)
-
-    fig = px.bar(
-        x=poktan_in_desa,
-        y=[1] * len(poktan_in_desa),
-        labels={"x": "Nama Poktan", "y": "Jumlah"},
-        title=f"Jumlah Poktan di Desa {desa_select}",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-# ======================================================
-# HALAMAN  — DETAIL POKTAN
-# ======================================================
-elif menu == "Detail Poktan":
-    st.title("🔍 Detail Poktan")
-
-    kec_select = st.selectbox("Pilih Kecamatan", list(poktan_list.keys()))
-    desa_select = st.selectbox("Pilih Desa", list(poktan_list[kec_select].keys()))
-    poktan_select = st.selectbox("Pilih Poktan", poktan_list[kec_select][desa_select])
-
-    detail = df[
-        (df["kecamatan"] == kec_select)
-        & (df["desa"] == desa_select)
-        & (df["nama_poktan"].str.contains(poktan_select, case=False, na=False))
-    ]
-
-    st.subheader(f"📌 Detail Poktan: {poktan_select}")
-    st.dataframe(detail if not detail.empty else "Tidak ada detail tambahan dalam dataset.")
-# ===========================
-# HALAMAN – TOP DESA
-# ===========================
-elif menu == "Top Desa Teraktif":
-    st.title("🔥 Top Desa dengan Poktan Terbanyak")
-
-    per_desa = df.groupby(["kecamatan", "desa"]).size().reset_index(name="jumlah_poktan")
-    top_desa = per_desa.sort_values("jumlah_poktan", ascending=False).head(15)
-
-    fig = px.bar(top_desa, x="jumlah_poktan", y="desa",
-                 orientation="h",
-                 color="jumlah_poktan",
-                 title="Top 15 Desa Paling Aktif")
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# ===========================
-# HALAMAN – KWT VS POKTAN
-# ===========================
-elif menu == "KWT vs Poktan":
-    st.title("🌾 Komposisi KWT vs Poktan")
-
-    counts = df["tipe"].value_counts().reset_index()
-    counts.columns = ["tipe", "jumlah"]
-    fig = px.pie(counts, names="tipe", values="jumlah")
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# ===========================
-# HALAMAN – TABEL DATA
-# ===========================
-elif menu == "Tabel Data":
-    st.title("📋 Data Lengkap Kelompok Tani")
-    st.dataframe(df)
 
