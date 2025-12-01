@@ -129,28 +129,80 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 # ================================
-# INTERACTIVE MENU
+# INTERACTIVE MENU (PREMIUM GOLD)
 # ================================
+
 st.markdown("### 🔎 Detail Gapoktan per Kecamatan & Desa")
 
+# --- Kolom Filter ---
 c1, c2 = st.columns(2)
 
-# --- Dropdown Kecamatan Menggunakan List Bersih dari Excel ---
-kec_select = c1.selectbox("Pilih Kecamatan", sorted(list_kecamatan))
+# Searchable dropdown kecamatan
+kec_select = c1.selectbox(
+    "Pilih Kecamatan",
+    sorted(list_kecamatan_clean),
+    index=None,
+    placeholder="Cari kecamatan..."
+)
 
-# --- Desa mengikuti kecamatan terpilih ---
-desa_list = sorted(data_hierarchy[kec_select].keys())
-desa_select = c2.selectbox("Pilih Desa", desa_list)
+# Validasi
+if kec_select is None:
+    st.info("Silakan pilih kecamatan untuk melihat data.")
+    st.stop()
 
-gapoktan_list = data_hierarchy[kec_select][desa_select]
+# Multiselect desa
+desa_multiselect = c2.multiselect(
+    "Pilih Desa (bisa lebih dari satu)",
+    sorted(data_hierarchy[kec_select].keys()),
+    placeholder="Pilih satu atau lebih desa..."
+)
 
-st.markdown(f"### 🌱 Daftar Gapoktan – **{desa_select}**")
+# Jika belum pilih desa → fallback 1 desa default
+if not desa_multiselect:
+    desa_multiselect = [sorted(data_hierarchy[kec_select].keys())[0]]
 
-if len(gapoktan_list) == 0:
-    st.info("Tidak ada data gapoktan untuk desa ini.")
-else:
-    for g in gapoktan_list:
+# SUMMARY TOP
+summary_total = sum(len(data_hierarchy[kec_select][d]) for d in desa_multiselect)
+
+st.markdown(f"""
+<div class="card-summary">
+<h2>📊 Total Gapoktan untuk Desa Terpilih</h2>
+<p>{summary_total}</p>
+</div>
+""", unsafe_allow_html=True)
+
+# CHART DESA
+chart_desa = []
+for d in data_hierarchy[kec_select]:
+    chart_desa.append({"desa": d, "gapoktan": len(data_hierarchy[kec_select][d])})
+
+fig_desa = px.bar(
+    pd.DataFrame(chart_desa),
+    x="desa",
+    y="gapoktan",
+    title=f"Distribusi Gapoktan per Desa – Kecamatan {kec_select}",
+    color="gapoktan",
+    color_continuous_scale="YlGn"
+)
+st.plotly_chart(fig_desa, use_container_width=True)
+
+# TABLE DETAIL
+st.markdown("### 🧩 Tabel Gapoktan per Desa (Data Terpilih)")
+
+table_data = []
+for desa in desa_multiselect:
+    for g in data_hierarchy[kec_select][desa]:
+        table_data.append([desa, g])
+
+df_table = pd.DataFrame(table_data, columns=["Desa", "Gapoktan"])
+st.dataframe(df_table, use_container_width=True, hide_index=True)
+
+# LIST GAPOKTAN PER DESA
+for desa in desa_multiselect:
+    st.markdown(f"### 🌱 Daftar Gapoktan – **{desa}**")
+    for g in data_hierarchy[kec_select][desa]:
         st.markdown(f"- {g}")
+
 
 
 
