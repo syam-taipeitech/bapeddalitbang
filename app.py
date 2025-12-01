@@ -10,205 +10,159 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import base64
-import os
-from io import BytesIO
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
 
+st.set_page_config(page_title="Dashboard Sabda Tani", layout="wide")
 
-# ================================================================
-#  LOAD CSS PREMIUM
-# ================================================================
-css_path = "sabdatani.css"
-if os.path.exists(css_path):
-    with open(css_path) as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-else:
-    st.warning("⚠ File sabdatani.css tidak ditemukan.")
+# ================================
+# LOAD CUSTOM CSS
+# ================================
+with open("sabdatani.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-
-# ================================================================
-#  LOAD EXCEL DATA
-# ================================================================
+# ================================
+# LOAD DATA EXCEL (MASTER)
+# ================================
 @st.cache_data
-def load_data():
-    df_raw = pd.read_excel("data1.xlsx")
-    return df_raw
+def load_excel():
+    df_raw = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx", header=None)
 
-df_raw = load_data()
+    # Kolom A = Kecamatan
+    kecamatan_series = df_raw.iloc[:, 0].dropna().reset_index(drop=True)
 
+    # Kolom B–M = Desa
+    desa_df = df_raw.iloc[:, 1:13]
 
-# ================================================================
-#  PARSER KECAMATAN → DESA → GAPOKTAN
-# ================================================================
-def parse_kecamatan_desa_gapoktan(df):
-    rows = []
+    # Kolom N–GC = Gapoktan
+    gap_df = df_raw.iloc[:, 13: ]
 
-    for i, row in df.iterrows():
-        kecamatan = str(row.iloc[0]).strip()          # kolom A
-        desa_cols = row.iloc[1:13]                    # kolom B-M (12 kolom)
-        gapoktan_cols = row.iloc[13:]                 # kolom N-GC (semua gapoktan)
+    data_list = []
 
-        desa_list = [str(d).strip() for d in desa_cols if pd.notna(d) and str(d).strip() != ""]
-        gapoktan_list = [str(g).strip() for g in gapoktan_cols if pd.notna(g) and str(g).strip() != ""]
+    for i, kec in kecamatan_series.items():
+        # Ambil desa di baris yang sama
+        desa_row = desa_df.iloc[i].dropna().tolist()
 
-        for idx, desa in enumerate(desa_list):
-            if idx < len(gapoktan_list):
-                rows.append({
-                    "Kecamatan": kecamatan,
-                    "Desa": desa,
-                    "Gapoktan": gapoktan_list[idx]
-                })
-            else:
-                rows.append({
-                    "Kecamatan": kecamatan,
-                    "Desa": desa,
-                    "Gapoktan": None
-                })
+        for desa in desa_row:
+            # Ambil gapoktan untuk desa ini (baris i)
+            gap_list = gap_df.iloc[i].dropna().tolist()
 
-    return pd.DataFrame(rows)
+            for gap in gap_list:
+                data_list.append([kec, desa, gap])
 
+    df_final = pd.DataFrame(data_list, columns=["Kecamatan", "Desa", "Gapoktan"])
 
-df_final = parse_kecamatan_desa_gapoktan(df_raw)
+    # ================================
+    # CLEANING PREMIUM
+    # ================================
+    df_final = df_final.dropna(subset=["Kecamatan"])
+    df_final = df_final[df_final["Desa"].notna() & (df_final["Desa"] != "")]
+    df_final = df_final[df_final["Gapoktan"].notna() & (df_final["Gapoktan"] != "")]
+    df_final = df_final.reset_index(drop=True)
 
+    return df_final
 
-# ================================================================
-#  PDF GENERATOR
-# ================================================================
-def generate_pdf(df):
-    buffer = BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
+df = load_excel()
 
-    p.setFont("Helvetica-Bold", 22)
-    p.drawString(70, height - 70, "LAPORAN GAPOKTAN SABDA TANI – PACITAN")
-    p.setFont("Helvetica", 14)
-    p.drawString(70, height - 100, "Data Kecamatan → Desa → Gapoktan")
+# ================================
+# DASHBOARD TITLE
+# ================================
+st.markdown("""
+<h1 class='title-main'>🌾 Dashboard Sabda Tani – Gapoktan Pacitan</h1>
+""", unsafe_allow_html=True)
 
-    p.showPage()
+# ================================
+# KARTU STATISTIK
+# ================================
+col1, col2, col3 = st.columns(3)
 
-    for kec in df["Kecamatan"].unique():
-        sub = df[df["Kecamatan"] == kec]
+with col1:
+    st.markdown(f"""
+    <div class='card'>
+        <h3>Total Kecamatan</h3>
+        <p>{df['Kecamatan'].nunique()}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-        p.setFont("Helvetica-Bold", 18)
-        p.drawString(60, height - 60, f"Kecamatan: {kec}")
+with col2:
+    st.markdown(f"""
+    <div class='card'>
+        <h3>Total Desa</h3>
+        <p>{df['Desa'].nunique()}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-        y = height - 100
-        for _, row in sub.iterrows():
-            p.setFont("Helvetica", 12)
-            text = f"- {row['Desa']} : {row['Gapoktan']}"
-            p.drawString(80, y, text)
-            y -= 18
+with col3:
+    st.markdown(f"""
+    <div class='card'>
+        <h3>Total Gapoktan</h3>
+        <p>{df['Gapoktan'].nunique()}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-            if y < 60:
-                p.showPage()
-                y = height - 60
+st.markdown("<br>", unsafe_allow_html=True)
 
-        p.showPage()
+# ================================
+# MENU FILTER
+# ================================
+st.subheader("🔎 Eksplorasi Data")
 
-    p.save()
-    buffer.seek(0)
-    return buffer
-
-
-# ================================================================
-#  SIDEBAR MENU
-# ================================================================
-st.sidebar.title("🌿 Sabda Tani Dashboard")
-menu = st.sidebar.radio(
-    "Navigasi",
-    [
-        "Dashboard Utama",
-        "Detail Per Kecamatan",
-        "Data Gapoktan",
-        "Export PDF"
-    ]
+menu = st.selectbox(
+    "Pilih Mode Tampilan",
+    ["Per Kecamatan", "Per Desa", "Per Gapoktan"]
 )
 
-# ================================================================
-#  DASHBOARD UTAMA
-# ================================================================
-if menu == "Dashboard Utama":
-    st.title("🌾 Dashboard Sabda Tani – Gapoktan Pacitan")
-
-    total_kec = df_final["Kecamatan"].nunique()
-    total_desa = df_final["Desa"].nunique()
-    total_gapo = df_final["Gapoktan"].nunique()
-
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(f'<div class="kpi-card"><h3>Total Kecamatan</h3><h1>{total_kec}</h1></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="kpi-card"><h3>Total Desa</h3><h1>{total_desa}</h1></div>', unsafe_allow_html=True)
-    c3.markdown(f'<div class="kpi-card"><h3>Total Gapoktan</h3><h1>{total_gapo}</h1></div>', unsafe_allow_html=True)
-
+# ================================
+# 1) PER KECAMATAN
+# ================================
+if menu == "Per Kecamatan":
     st.subheader("📊 Jumlah Gapoktan per Kecamatan")
 
-    df_count = df_final.groupby("Kecamatan")["Gapoktan"].count().reset_index()
-    fig = px.bar(df_count, x="Kecamatan", y="Gapoktan",
-                 color="Gapoktan", color_continuous_scale="Greens",
-                 title="Distribusi Gapoktan per Kecamatan")
-    st.plotly_chart(fig, use_container_width=True)
-
-# ================================================================
-#  DASHBOARD DETAIL (PER KECAMATAN → DESA → GAPOKTAN)
-# ================================================================
-elif menu == "Detail Per Kecamatan":
-    st.title("📍 Detail Kecamatan → Desa → Gapoktan")
-
-    # Pilih Kecamatan
-    kec_select = st.selectbox("Pilih Kecamatan", df_final["Kecamatan"].unique())
-
-    # Filter desa berdasarkan kecamatan
-    desa_list = df_final[df_final["Kecamatan"] == kec_select]["Desa"].unique()
-    desa_select = st.selectbox("Pilih Desa", desa_list)
-
-    # Tampilkan gapoktan per desa
-    hasil = df_final[
-        (df_final["Kecamatan"] == kec_select) &
-        (df_final["Desa"] == desa_select)
-    ]
-
-    st.subheader(f"📌 Gapoktan di Desa {desa_select}")
-    st.dataframe(hasil[["Gapoktan"]])
-
-    # Kartu / Card
-    for _, row in hasil.iterrows():
-        st.markdown(
-            f"""
-            <div class='kpi-card'>
-                <h3>{row['Gapoktan']}</h3>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    # Grafik batang per desa
-    st.subheader("📊 Grafik Jumlah Gapoktan per Desa (Hanya Desa Terpilih)")
+    gap_kec = df.groupby("Kecamatan").size().reset_index(name="Jumlah")
+    gap_kec = gap_kec.sort_values("Kecamatan")
 
     fig = px.bar(
-        hasil,
-        x="Desa",
-        y=[1] * len(hasil),  # karena per desa jumlah gapoktan = n baris
-        title=f"Jumlah Gapoktan di {desa_select}",
-        labels={"y": "Jumlah Gapoktan"},
-        color_discrete_sequence=["#16a34a"]
+        gap_kec,
+        x="Kecamatan",
+        y="Jumlah",
+        color="Jumlah",
+        color_continuous_scale="Greens",
+        title="Distribusi Gapoktan per Kecamatan",
     )
     st.plotly_chart(fig, use_container_width=True)
 
+# ================================
+# 2) PER DESA
+# ================================
+if menu == "Per Desa":
+    st.subheader("🌾 Jumlah Gapoktan per Desa")
 
-# ================================================================
-#  DATA GAPOKTAN
-# ================================================================
-elif menu == "Data Gapoktan":
-    st.title("📋 Data Gapoktan per Desa")
+    kec_select = st.selectbox("Pilih Kecamatan", df["Kecamatan"].unique())
 
-    kec_select = st.selectbox("Pilih Kecamatan", df_final["Kecamatan"].unique())
-    desa_select = st.selectbox("Pilih Desa", df_final[df_final["Kecamatan"] == kec_select]["Desa"].unique())
+    desa_filtered = df[df["Kecamatan"] == kec_select]
+    desa_count = desa_filtered.groupby("Desa").size().reset_index(name="Jumlah")
 
-    sub = df_final[(df_final["Kecamatan"] == kec_select) & (df_final["Desa"] == desa_select)]
+    fig = px.bar(
+        desa_count,
+        x="Desa",
+        y="Jumlah",
+        color="Jumlah",
+        title=f"Gapoktan per Desa – {kec_select}",
+        color_continuous_scale="Greens",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.dataframe(sub)
+# ================================
+# 3) PER GAPOKTAN
+# ================================
+if menu == "Per Gapoktan":
+    st.subheader("📌 Detail Gapoktan per Desa")
 
+    kec_select = st.selectbox("Pilih Kecamatan", df["Kecamatan"].unique())
+    desa_select = st.selectbox("Pilih Desa", df[df["Kecamatan"] == kec_select]["Desa"].unique())
+
+    detail = df[(df["Kecamatan"] == kec_select) & (df["Desa"] == desa_select)]
+
+    st.write(f"### Daftar Gapoktan di **{desa_select}** – Kecamatan **{kec_select}**")
+    st.table(detail[["Gapoktan"]].reset_index(drop=True))
 
 
 # ================================================================
