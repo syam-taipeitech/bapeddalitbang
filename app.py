@@ -10,122 +10,98 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import folium
-from streamlit_folium import st_folium
-from folium.plugins import MarkerCluster
-from geopy.geocoders import Nominatim
 import base64
+import os
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-import os
 
 
 # ================================================================
-#  LOAD PREMIUM CSS
+#  LOAD CSS PREMIUM
 # ================================================================
 css_path = "sabdatani.css"
 if os.path.exists(css_path):
     with open(css_path) as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 else:
-    st.warning("⚠ File CSS sabdatani.css tidak ditemukan.")
+    st.warning("⚠ File sabdatani.css tidak ditemukan.")
 
 
 # ================================================================
-#  LOAD EXCEL FILE (2 SHEET)
-# ================================================================
-@st.cache_data
-def load_excel():
-    df_desa = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx", sheet_name=0)
-    df_poktan = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx", sheet_name=1)
-    return df_desa, df_poktan
-
-df_desa_raw, df_poktan_raw = load_excel()
-
-
-# ================================================================
-#  PARSER DESA (FORMAT TIAP KOLOM = 1 KECAMATAN)
-# ================================================================
-def parse_desa_per_kecamatan(df):
-    rows = []
-    for col in df.columns:
-        kec = col.strip()
-        for val in df[col].dropna():
-            desa = str(val).strip()
-            if desa != "":
-                rows.append({"Kecamatan": kec, "Desa": desa})
-    return pd.DataFrame(rows)
-
-df_desa = parse_desa_per_kecamatan(df_desa_raw)
-
-
-# ================================================================
-#  PARSER POKTAN (FORMAT TIAP KOLOM = 1 DESA)
-# ================================================================
-def parse_poktan_list(df):
-    rows = []
-    for col in df.columns:
-        desa = col.strip()
-        for val in df[col].dropna():
-            poktan = str(val).strip()
-            if poktan != "":
-                rows.append({"Desa": desa, "Poktan": poktan})
-    return pd.DataFrame(rows)
-
-df_poktan = parse_poktan_list(df_poktan_raw)
-
-
-# ================================================================
-#  MERGE DESA ↔ POKTAN
-# ================================================================
-df_final = df_desa.merge(df_poktan, on="Desa", how="left")
-df_final = df_final.dropna(subset=["Poktan"])
-
-
-# ================================================================
-#  GEOCODER (CACHE)
+#  LOAD EXCEL DATA
 # ================================================================
 @st.cache_data
-def geocode_place(place):
-    geolocator = Nominatim(user_agent="sabdatani")
-    try:
-        loc = geolocator.geocode(place + ", Pacitan, Jawa Timur, Indonesia")
-        if loc:
-            return loc.latitude, loc.longitude
-    except:
-        return None
-    return None
+def load_data():
+    df_raw = pd.read_excel("penilaian kelas kelompok tani 2025 (2).xlsx")
+    return df_raw
+
+df_raw = load_data()
 
 
 # ================================================================
-#  PDF REPORT GENERATOR
+#  PARSER KECAMATAN → DESA → GAPOKTAN
+# ================================================================
+def parse_kecamatan_desa_gapoktan(df):
+    rows = []
+
+    for i, row in df.iterrows():
+        kecamatan = str(row.iloc[0]).strip()          # kolom A
+        desa_cols = row.iloc[1:13]                    # kolom B-M (12 kolom)
+        gapoktan_cols = row.iloc[13:]                 # kolom N-GC (semua gapoktan)
+
+        desa_list = [str(d).strip() for d in desa_cols if pd.notna(d) and str(d).strip() != ""]
+        gapoktan_list = [str(g).strip() for g in gapoktan_cols if pd.notna(g) and str(g).strip() != ""]
+
+        for idx, desa in enumerate(desa_list):
+            if idx < len(gapoktan_list):
+                rows.append({
+                    "Kecamatan": kecamatan,
+                    "Desa": desa,
+                    "Gapoktan": gapoktan_list[idx]
+                })
+            else:
+                rows.append({
+                    "Kecamatan": kecamatan,
+                    "Desa": desa,
+                    "Gapoktan": None
+                })
+
+    return pd.DataFrame(rows)
+
+
+df_final = parse_kecamatan_desa_gapoktan(df_raw)
+
+
+# ================================================================
+#  PDF GENERATOR
 # ================================================================
 def generate_pdf(df):
     buffer = BytesIO()
     p = canvas.Canvas(buffer, pagesize=A4)
-
     width, height = A4
+
     p.setFont("Helvetica-Bold", 22)
-    p.drawString(80, height - 80, "LAPORAN DATA POKTAN – SABDA TANI")
+    p.drawString(70, height - 70, "LAPORAN GAPOKTAN SABDA TANI – PACITAN")
     p.setFont("Helvetica", 14)
-    p.drawString(80, height - 110, "Kabupaten Pacitan – 2025")
+    p.drawString(70, height - 100, "Data Kecamatan → Desa → Gapoktan")
 
     p.showPage()
 
     for kec in df["Kecamatan"].unique():
         sub = df[df["Kecamatan"] == kec]
+
         p.setFont("Helvetica-Bold", 18)
-        p.drawString(70, height - 60, f"Kecamatan: {kec}")
+        p.drawString(60, height - 60, f"Kecamatan: {kec}")
 
         y = height - 100
         for _, row in sub.iterrows():
             p.setFont("Helvetica", 12)
-            text = f"- {row['Desa']} : {row['Poktan']}"
-            p.drawString(90, y, text)
+            text = f"- {row['Desa']} : {row['Gapoktan']}"
+            p.drawString(80, y, text)
             y -= 18
 
-            if y < 80:
+            if y < 60:
                 p.showPage()
                 y = height - 60
 
@@ -141,8 +117,8 @@ def generate_pdf(df):
 # ================================================================
 st.sidebar.title("🌿 Sabda Tani Dashboard")
 menu = st.sidebar.radio(
-    "Menu Navigasi",
-    ["Dashboard Utama", "Data Poktan", "Peta GIS", "Export PDF"]
+    "Navigasi",
+    ["Dashboard Utama", "Data Gapoktan", "Export PDF"]
 )
 
 
@@ -150,72 +126,53 @@ menu = st.sidebar.radio(
 #  DASHBOARD UTAMA
 # ================================================================
 if menu == "Dashboard Utama":
-    st.title("🌾 Dashboard Sabda Tani")
+    st.title("🌾 Dashboard Sabda Tani – Gapoktan Pacitan")
 
-    total_kec = df_desa["Kecamatan"].nunique()
-    total_desa = df_desa["Desa"].nunique()
-    total_poktan = df_poktan["Poktan"].nunique()
+    total_kec = df_final["Kecamatan"].nunique()
+    total_desa = df_final["Desa"].nunique()
+    total_gapo = df_final["Gapoktan"].nunique()
 
-    col1, col2, col3 = st.columns(3)
-    col1.markdown(f'<div class="kpi-card"><h3>Total Kecamatan</h3><h1>{total_kec}</h1></div>', unsafe_allow_html=True)
-    col2.markdown(f'<div class="kpi-card"><h3>Total Desa</h3><h1>{total_desa}</h1></div>', unsafe_allow_html=True)
-    col3.markdown(f'<div class="kpi-card"><h3>Total Poktan</h3><h1>{total_poktan}</h1></div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f'<div class="kpi-card"><h3>Total Kecamatan</h3><h1>{total_kec}</h1></div>', unsafe_allow_html=True)
+    c2.markdown(f'<div class="kpi-card"><h3>Total Desa</h3><h1>{total_desa}</h1></div>', unsafe_allow_html=True)
+    c3.markdown(f'<div class="kpi-card"><h3>Total Gapoktan</h3><h1>{total_gapo}</h1></div>', unsafe_allow_html=True)
 
-    st.subheader("📊 Jumlah Poktan per Kecamatan")
-    df_count = df_final.groupby("Kecamatan")["Poktan"].count().reset_index()
-    fig = px.bar(df_count, x="Kecamatan", y="Poktan",
-                 color="Poktan", color_continuous_scale="Greens",
-                 title="Distribusi Poktan per Kecamatan")
+    st.subheader("📊 Jumlah Gapoktan per Kecamatan")
+
+    df_count = df_final.groupby("Kecamatan")["Gapoktan"].count().reset_index()
+    fig = px.bar(df_count, x="Kecamatan", y="Gapoktan",
+                 color="Gapoktan", color_continuous_scale="Greens",
+                 title="Distribusi Gapoktan per Kecamatan")
     st.plotly_chart(fig, use_container_width=True)
 
 
-# ================================================================
-#  DATA POKTAN
-# ================================================================
-elif menu == "Data Poktan":
-    st.title("📋 Data Poktan per Desa")
 
-    kec_select = st.selectbox("Pilih Kecamatan", df_desa["Kecamatan"].unique())
-    desa_select = st.selectbox("Pilih Desa", df_desa[df_desa["Kecamatan"] == kec_select]["Desa"].unique())
+# ================================================================
+#  DATA GAPOKTAN
+# ================================================================
+elif menu == "Data Gapoktan":
+    st.title("📋 Data Gapoktan per Desa")
+
+    kec_select = st.selectbox("Pilih Kecamatan", df_final["Kecamatan"].unique())
+    desa_select = st.selectbox("Pilih Desa", df_final[df_final["Kecamatan"] == kec_select]["Desa"].unique())
 
     sub = df_final[(df_final["Kecamatan"] == kec_select) & (df_final["Desa"] == desa_select)]
-    st.dataframe(sub[["Desa", "Poktan"]])
 
+    st.dataframe(sub)
 
-# ================================================================
-#  PETA GIS
-# ================================================================
-elif menu == "Peta GIS":
-    st.title("🗺 Peta GIS Poktan Sabda Tani")
-
-    map_center = [-8.2045, 111.0874]
-    m = folium.Map(location=map_center, zoom_start=11)
-    cluster = MarkerCluster().add_to(m)
-
-    for _, row in df_final.iterrows():
-        loc = geocode_place(row["Desa"])
-        if loc:
-            folium.Marker(
-                location=loc,
-                tooltip=row["Desa"],
-                popup=f"<b>Desa:</b> {row['Desa']}<br><b>Poktan:</b> {row['Poktan']}"
-            ).add_to(cluster)
-
-    st_folium(m, width=900, height=600)
 
 
 # ================================================================
 #  EXPORT PDF
 # ================================================================
 elif menu == "Export PDF":
-    st.title("📄 Export Laporan PDF")
+    st.title("📄 Export Laporan Gapoktan")
 
     pdf_buffer = generate_pdf(df_final)
     b64 = base64.b64encode(pdf_buffer.read()).decode()
+    link = f'<a href="data:application/octet-stream;base64,{b64}" download="Laporan_Gapoktan_SabdaTani.pdf">📥 Download PDF</a>'
 
-    href = f'<a href="data:application/octet-stream;base64,{b64}" download="Laporan_SabdaTani.pdf">📥 Download PDF</a>'
-    st.markdown(href, unsafe_allow_html=True)
-
+    st.markdown(link, unsafe_allow_html=True)
 
 
 
